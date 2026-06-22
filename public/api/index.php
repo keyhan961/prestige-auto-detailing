@@ -33,7 +33,77 @@ function read_body(): array {
     return $_POST;
 }
 
+function db_configured(): bool {
+    global $config;
+    $db = $config['database'] ?? [];
+    $placeholders = ['your_database_user', 'your_database_password', ''];
+    return required_value($db['host'] ?? '')
+        && required_value($db['name'] ?? '')
+        && required_value($db['user'] ?? '')
+        && array_key_exists('password', $db)
+        && !in_array((string)$db['user'], $placeholders, true)
+        && !in_array((string)$db['password'], $placeholders, true);
+}
+
+function db_table(): string {
+    global $config;
+    $table = (string)(($config['database'] ?? [])['table'] ?? 'appointments');
+    return preg_replace('/[^a-zA-Z0-9_]/', '', $table) ?: 'appointments';
+}
+
+function db(): ?PDO {
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+    if (!db_configured()) {
+        return null;
+    }
+    global $config;
+    $db = $config['database'];
+    $dsn = 'mysql:host=' . $db['host'] . ';dbname=' . $db['name'] . ';charset=utf8mb4';
+    $pdo = new PDO($dsn, (string)$db['user'], (string)$db['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+    ensure_database_table($pdo);
+    return $pdo;
+}
+
+function ensure_database_table(PDO $pdo): void {
+    $table = db_table();
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS `$table` (
+            id VARCHAR(64) NOT NULL PRIMARY KEY,
+            status VARCHAR(40) NOT NULL DEFAULT 'pending',
+            preferred_date DATE NULL,
+            preferred_time TIME NULL,
+            duration_minutes INT NOT NULL DEFAULT 120,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NULL,
+            data LONGTEXT NOT NULL,
+            INDEX idx_slot (status, preferred_date, preferred_time),
+            INDEX idx_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+
 function read_appointments(): array {
+    $pdo = db();
+    if ($pdo instanceof PDO) {
+        $table = db_table();
+        $rows = $pdo->query("SELECT data FROM `$table` ORDER BY created_at ASC")->fetchAll();
+        $appointments = [];
+        foreach ($rows as $row) {
+            $appointment = json_decode((string)$row['data'], true);
+            if (is_array($appointment)) {
+                $appointments[] = $appointment;
+            }
+        }
+        return $appointments;
+    }
+
     global $appointmentsFile;
     if (!file_exists($appointmentsFile)) {
         return [];
@@ -43,6 +113,36 @@ function read_appointments(): array {
 }
 
 function write_appointments(array $appointments): void {
+    $pdo = db();
+    if ($pdo instanceof PDO) {
+        $table = db_table();
+        $pdo->beginTransaction();
+        try {
+            $pdo->exec("DELETE FROM `$table`");
+            $statement = $pdo->prepare(
+                "INSERT INTO `$table` (id, status, preferred_date, preferred_time, duration_minutes, created_at, updated_at, data)
+                 VALUES (:id, :status, :preferred_date, :preferred_time, :duration_minutes, :created_at, :updated_at, :data)"
+            );
+            foreach ($appointments as $appointment) {
+                $statement->execute([
+                    ':id' => (string)($appointment['id'] ?? bin2hex(random_bytes(16))),
+                    ':status' => (string)($appointment['status'] ?? 'pending'),
+                    ':preferred_date' => required_value($appointment['preferredDate'] ?? '') ? $appointment['preferredDate'] : null,
+                    ':preferred_time' => required_value($appointment['preferredTime'] ?? '') ? $appointment['preferredTime'] : null,
+                    ':duration_minutes' => normalize_duration($appointment['durationMinutes'] ?? 120),
+                    ':created_at' => gmdate('Y-m-d H:i:s', strtotime((string)($appointment['createdAt'] ?? 'now'))),
+                    ':updated_at' => !empty($appointment['updatedAt']) ? gmdate('Y-m-d H:i:s', strtotime((string)$appointment['updatedAt'])) : null,
+                    ':data' => json_encode($appointment, JSON_UNESCAPED_UNICODE),
+                ]);
+            }
+            $pdo->commit();
+        } catch (Throwable $error) {
+            $pdo->rollBack();
+            throw $error;
+        }
+        return;
+    }
+
     global $dataDir, $appointmentsFile;
     if (!is_dir($dataDir)) {
         mkdir($dataDir, 0755, true);
