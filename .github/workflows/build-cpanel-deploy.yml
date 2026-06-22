@@ -1,0 +1,49 @@
+name: Build cPanel deploy branch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build website
+        run: npm run build
+
+      - name: Add cPanel deployment file
+        run: |
+          cat > dist/.cpanel.yml <<'YAML'
+          ---
+          deployment:
+            tasks:
+              - export DEPLOYPATH=/home/prestige/public_html/
+              - /bin/cp -R * $DEPLOYPATH
+              - /bin/cp -R .htaccess $DEPLOYPATH
+          YAML
+
+      - name: Publish deploy branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: cpanel-deploy
+          publish_dir: ./dist
+          force_orphan: true

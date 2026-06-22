@@ -1,0 +1,9 @@
+.env
+node_modules
+dist
+*.log
+server/data
+public/api/data
+google-service-account.json
+*.tsbuildinfo
+deploy
