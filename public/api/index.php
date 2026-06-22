@@ -201,6 +201,197 @@ function send_site_mail(string $to, string $subject, string $body, string $reply
     return @mail($to, $subject, $body, implode("\r\n", $headers));
 }
 
+function base64url_encode(string $value): string {
+    return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+}
+
+function http_json(string $url, array $payload, array $headers = []): array {
+    $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => array_merge(['Content-Type: application/json'], $headers),
+            CURLOPT_TIMEOUT => 20,
+        ]);
+        $response = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($response === false) {
+            throw new RuntimeException('Calendar HTTP request failed: ' . $error);
+        }
+    } else {
+        $response = file_get_contents($url, false, stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", array_merge(['Content-Type: application/json'], $headers)),
+                'content' => $body,
+                'timeout' => 20,
+                'ignore_errors' => true,
+            ],
+        ]));
+        $status = 200;
+        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match)) {
+            $status = (int)$match[1];
+        }
+    }
+    $decoded = json_decode((string)$response, true);
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Calendar HTTP request failed with status ' . $status . ': ' . substr((string)$response, 0, 500));
+    }
+    return is_array($decoded) ? $decoded : [];
+}
+
+function http_form(string $url, array $payload): array {
+    $body = http_build_query($payload);
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_TIMEOUT => 20,
+        ]);
+        $response = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($response === false) {
+            throw new RuntimeException('Google token request failed: ' . $error);
+        }
+    } else {
+        $response = file_get_contents($url, false, stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => 'Content-Type: application/x-www-form-urlencoded',
+                'content' => $body,
+                'timeout' => 20,
+                'ignore_errors' => true,
+            ],
+        ]));
+        $status = 200;
+        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $match)) {
+            $status = (int)$match[1];
+        }
+    }
+    $decoded = json_decode((string)$response, true);
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Google token request failed with status ' . $status . ': ' . substr((string)$response, 0, 500));
+    }
+    return is_array($decoded) ? $decoded : [];
+}
+
+function google_calendar_configured(): bool {
+    global $config;
+    $calendar = $config['google_calendar'] ?? [];
+    return !empty($calendar['enabled'])
+        && required_value($calendar['calendar_id'] ?? '')
+        && required_value($calendar['service_account_file'] ?? '')
+        && file_exists((string)$calendar['service_account_file']);
+}
+
+function google_access_token(): string {
+    global $config;
+    $calendar = $config['google_calendar'];
+    $credentials = json_decode((string)file_get_contents((string)$calendar['service_account_file']), true);
+    if (!is_array($credentials) || empty($credentials['client_email']) || empty($credentials['private_key'])) {
+        throw new RuntimeException('Google service account JSON is invalid.');
+    }
+    $now = time();
+    $header = ['alg' => 'RS256', 'typ' => 'JWT'];
+    $claims = [
+        'iss' => $credentials['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/calendar.events',
+        'aud' => 'https://oauth2.googleapis.com/token',
+        'iat' => $now,
+        'exp' => $now + 3600,
+    ];
+    $unsigned = base64url_encode(json_encode($header)) . '.' . base64url_encode(json_encode($claims));
+    $signature = '';
+    if (!openssl_sign($unsigned, $signature, $credentials['private_key'], OPENSSL_ALGO_SHA256)) {
+        throw new RuntimeException('Could not sign Google service account JWT.');
+    }
+    $jwt = $unsigned . '.' . base64url_encode($signature);
+    $response = http_form('https://oauth2.googleapis.com/token', [
+        'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        'assertion' => $jwt,
+    ]);
+    if (empty($response['access_token'])) {
+        throw new RuntimeException('Google access token response did not include an access token.');
+    }
+    return (string)$response['access_token'];
+}
+
+function appointment_datetime(array $appointment, int $minutesToAdd = 0): string {
+    global $config;
+    $timezone = ($config['google_calendar'] ?? [])['timezone'] ?? 'Europe/Helsinki';
+    $date = new DateTimeImmutable(($appointment['preferredDate'] ?? '') . ' ' . ($appointment['preferredTime'] ?? '09:00'), new DateTimeZone($timezone));
+    if ($minutesToAdd > 0) {
+        $date = $date->modify('+' . $minutesToAdd . ' minutes');
+    }
+    return $date->format(DateTimeInterface::ATOM);
+}
+
+function create_google_calendar_event(array $appointment): array {
+    if (!google_calendar_configured()) {
+        return ['created' => false, 'message' => 'Google Calendar is not configured.'];
+    }
+    global $config;
+    if (!empty($appointment['calendarEventId'])) {
+        return ['created' => true, 'message' => 'Calendar event already exists.', 'eventId' => $appointment['calendarEventId'], 'eventLink' => $appointment['calendarEventLink'] ?? ''];
+    }
+    $token = google_access_token();
+    $calendar = $config['google_calendar'];
+    $vehicle = trim(($appointment['vehicleMake'] ?? '') . ' ' . ($appointment['vehicleModel'] ?? ''));
+    $duration = normalize_duration($appointment['durationMinutes'] ?? 120);
+    $payload = [
+        'summary' => 'Prestige Auto Detailing - ' . ($appointment['service'] ?? 'Appointment'),
+        'location' => $config['business_address'] ?? '',
+        'description' => "Customer: " . ($appointment['name'] ?? '-') . "\n"
+            . "Phone: " . ($appointment['phone'] ?? '-') . "\n"
+            . "Email: " . ($appointment['email'] ?? '-') . "\n"
+            . "Vehicle: " . ($vehicle !== '' ? $vehicle : '-') . "\n"
+            . "Service: " . ($appointment['service'] ?? '-') . "\n"
+            . "Message: " . ($appointment['message'] ?? '-'),
+        'start' => [
+            'dateTime' => appointment_datetime($appointment),
+            'timeZone' => $calendar['timezone'] ?? 'Europe/Helsinki',
+        ],
+        'end' => [
+            'dateTime' => appointment_datetime($appointment, $duration),
+            'timeZone' => $calendar['timezone'] ?? 'Europe/Helsinki',
+        ],
+    ];
+    $calendarId = rawurlencode((string)$calendar['calendar_id']);
+    $response = http_json('https://www.googleapis.com/calendar/v3/calendars/' . $calendarId . '/events', $payload, [
+        'Authorization: Bearer ' . $token,
+    ]);
+    return [
+        'created' => true,
+        'eventId' => $response['id'] ?? '',
+        'eventLink' => $response['htmlLink'] ?? '',
+        'message' => 'Google Calendar event created.',
+    ];
+}
+
+function confirm_appointment_calendar(array &$appointment): string {
+    try {
+        $result = create_google_calendar_event($appointment);
+        if (!empty($result['eventId'])) {
+            $appointment['calendarEventId'] = $result['eventId'];
+            $appointment['calendarEventLink'] = $result['eventLink'] ?? '';
+        }
+        return $result['message'] ?? '';
+    } catch (Throwable $error) {
+        $appointment['calendarError'] = $error->getMessage();
+        return 'Google Calendar event was not created: ' . $error->getMessage();
+    }
+}
+
 function normalize_duration($value): int {
     $duration = (int)$value;
     if ($duration <= 0) {
@@ -373,11 +564,12 @@ if ($method === 'GET' && preg_match('#^/appointments/([^/]+)/(confirm|deny|resch
     }
     $appointment['status'] = 'confirmed';
     $appointment['updatedAt'] = gmdate('c');
+    $calendarMessage = confirm_appointment_calendar($appointment);
     $appointments[$index] = $appointment;
     write_appointments($appointments);
     send_site_mail($appointment['email'], 'Your Prestige Auto Detailing appointment is confirmed', customer_decision_text('confirmed', $appointment), $GLOBALS['config']['company_email']);
-    send_site_mail($GLOBALS['config']['company_email'], 'Appointment confirmed: ' . $appointment['name'], "The appointment was confirmed.\n\nCustomer: {$appointment['name']}\nPhone: {$appointment['phone']}\nService: {$appointment['service']}\nDate: {$appointment['preferredDate']}\nTime: {$appointment['preferredTime']}");
-    echo '<html><body style="background:#050505;color:#f5f5f3;font-family:Arial;padding:40px;"><main style="max-width:640px;margin:auto;border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:28px;background:#111;"><h1 style="color:#e21b23;margin-top:0;">Appointment confirmed</h1><p>The customer has been emailed.</p></main></body></html>'; exit;
+    send_site_mail($GLOBALS['config']['company_email'], 'Appointment confirmed: ' . $appointment['name'], "The appointment was confirmed.\n\nCustomer: {$appointment['name']}\nPhone: {$appointment['phone']}\nService: {$appointment['service']}\nDate: {$appointment['preferredDate']}\nTime: {$appointment['preferredTime']}\n\nCalendar: {$calendarMessage}");
+    echo '<html><body style="background:#050505;color:#f5f5f3;font-family:Arial;padding:40px;"><main style="max-width:640px;margin:auto;border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:28px;background:#111;"><h1 style="color:#e21b23;margin-top:0;">Appointment confirmed</h1><p>The customer has been emailed.</p><p>' . h($calendarMessage) . '</p></main></body></html>'; exit;
 }
 
 if ($method === 'POST' && preg_match('#^/appointments/([^/]+)/deny$#', $path, $m)) {
@@ -438,11 +630,12 @@ if ($method === 'GET' && preg_match('#^/appointments/([^/]+)/alternative/accept$
     $appointment['preferredTime'] = $appointment['suggestedTime'];
     $appointment['status'] = 'confirmed';
     $appointment['updatedAt'] = gmdate('c');
+    $calendarMessage = confirm_appointment_calendar($appointment);
     $appointments[$index] = $appointment;
     write_appointments($appointments);
     send_site_mail($appointment['email'], 'Your Prestige Auto Detailing appointment is confirmed', customer_decision_text('confirmed', $appointment), $GLOBALS['config']['company_email']);
-    send_site_mail($GLOBALS['config']['company_email'], 'Customer accepted alternative time: ' . $appointment['name'], "The customer accepted the alternative appointment time.\n\nCustomer: {$appointment['name']}\nPhone: {$appointment['phone']}\nService: {$appointment['service']}\nDate: {$appointment['preferredDate']}\nTime: {$appointment['preferredTime']}");
-    echo '<html><body style="background:#050505;color:#f5f5f3;font-family:Arial;padding:40px;"><main style="max-width:640px;margin:auto;border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:28px;background:#111;"><h1 style="color:#e21b23;margin-top:0;">Appointment confirmed</h1><p>Your appointment has been confirmed.</p></main></body></html>'; exit;
+    send_site_mail($GLOBALS['config']['company_email'], 'Customer accepted alternative time: ' . $appointment['name'], "The customer accepted the alternative appointment time.\n\nCustomer: {$appointment['name']}\nPhone: {$appointment['phone']}\nService: {$appointment['service']}\nDate: {$appointment['preferredDate']}\nTime: {$appointment['preferredTime']}\n\nCalendar: {$calendarMessage}");
+    echo '<html><body style="background:#050505;color:#f5f5f3;font-family:Arial;padding:40px;"><main style="max-width:640px;margin:auto;border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:28px;background:#111;"><h1 style="color:#e21b23;margin-top:0;">Appointment confirmed</h1><p>Your appointment has been confirmed.</p><p>' . h($calendarMessage) . '</p></main></body></html>'; exit;
 }
 
 if ($method === 'POST' && preg_match('#^/appointments/([^/]+)/reschedule$#', $path, $m)) {

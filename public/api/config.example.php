@@ -13,4 +13,10 @@ return [
         'password' => 'your_database_password',
         'table' => 'appointments',
     ],
+    'google_calendar' => [
+        'enabled' => false,
+        'calendar_id' => 'detailinga028@gmail.com',
+        'service_account_file' => __DIR__ . '/private/google-service-account.json',
+        'timezone' => 'Europe/Helsinki',
+    ],
 ];
