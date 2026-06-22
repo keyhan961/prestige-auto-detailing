@@ -13,6 +13,27 @@ function required_value($value): bool {
     return is_string($value) && trim($value) !== '';
 }
 
+function clean_text($value, int $maxLength = 500): string {
+    $text = trim((string)($value ?? ''));
+    $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text) ?? '';
+    if (function_exists('mb_substr')) {
+        return mb_substr($text, 0, $maxLength);
+    }
+    return substr($text, 0, $maxLength);
+}
+
+function valid_date_value($value): bool {
+    if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return false;
+    }
+    [$year, $month, $day] = array_map('intval', explode('-', $value));
+    return checkdate($month, $day, $year);
+}
+
+function valid_time_value($value): bool {
+    return is_string($value) && preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $value) === 1;
+}
+
 function h($value): string {
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
 }
@@ -48,7 +69,10 @@ function db_configured(): bool {
 function db_table(): string {
     global $config;
     $table = (string)(($config['database'] ?? [])['table'] ?? 'appointments');
-    return preg_replace('/[^a-zA-Z0-9_]/', '', $table) ?: 'appointments';
+    if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,63}$/', $table)) {
+        throw new RuntimeException('Invalid database table name.');
+    }
+    return $table;
 }
 
 function db(): ?PDO {
@@ -484,6 +508,9 @@ if ($method === 'POST' && $path === '/availability') {
     if (!required_value($body['preferredDate'] ?? '') || !required_value($body['preferredTime'] ?? '')) {
         json_response(['message' => 'Preferred date and time are required.'], 400);
     }
+    if (!valid_date_value($body['preferredDate']) || !valid_time_value($body['preferredTime'])) {
+        json_response(['message' => 'Preferred date or time is invalid.'], 400);
+    }
     $available = slot_available($body['preferredDate'], $body['preferredTime'], normalize_duration($body['durationMinutes'] ?? 120));
     json_response(['available' => $available, 'configured' => true, 'message' => $available ? 'Time is available.' : 'That date and time is already booked.']);
 }
@@ -496,6 +523,12 @@ if ($method === 'POST' && $path === '/appointments') {
             json_response(['message' => 'Name, email, phone, service, preferred date, and preferred time are required.'], 400);
         }
     }
+    if (!filter_var((string)$body['email'], FILTER_VALIDATE_EMAIL)) {
+        json_response(['message' => 'Email address is invalid.'], 400);
+    }
+    if (!valid_date_value($body['preferredDate']) || !valid_time_value($body['preferredTime'])) {
+        json_response(['message' => 'Preferred date or time is invalid.'], 400);
+    }
     $duration = normalize_duration($body['durationMinutes'] ?? 120);
     if (!slot_available($body['preferredDate'], $body['preferredTime'], $duration)) {
         json_response(['message' => 'That date and time is already booked.'], 409);
@@ -506,17 +539,17 @@ if ($method === 'POST' && $path === '/appointments') {
         'customerToken' => bin2hex(random_bytes(24)),
         'status' => 'pending',
         'createdAt' => gmdate('c'),
-        'language' => $body['language'] ?? 'not specified',
-        'name' => trim((string)$body['name']),
-        'email' => trim((string)$body['email']),
-        'phone' => trim((string)$body['phone']),
-        'vehicleMake' => trim((string)($body['vehicleMake'] ?? '')),
-        'vehicleModel' => trim((string)($body['vehicleModel'] ?? '')),
-        'service' => trim((string)$body['service']),
+        'language' => clean_text($body['language'] ?? 'not specified', 20),
+        'name' => clean_text($body['name'], 120),
+        'email' => clean_text($body['email'], 190),
+        'phone' => clean_text($body['phone'], 60),
+        'vehicleMake' => clean_text($body['vehicleMake'] ?? '', 80),
+        'vehicleModel' => clean_text($body['vehicleModel'] ?? '', 80),
+        'service' => clean_text($body['service'], 120),
         'durationMinutes' => $duration,
-        'preferredDate' => trim((string)$body['preferredDate']),
-        'preferredTime' => trim((string)$body['preferredTime']),
-        'message' => trim((string)($body['message'] ?? '')),
+        'preferredDate' => clean_text($body['preferredDate'], 10),
+        'preferredTime' => clean_text($body['preferredTime'], 5),
+        'message' => clean_text($body['message'] ?? '', 2000),
     ];
     $appointments = read_appointments();
     $appointments[] = $appointment;
@@ -582,11 +615,14 @@ if ($method === 'POST' && preg_match('#^/appointments/([^/]+)/deny$#', $path, $m
     }
     $appointment = $appointments[$index];
     $hasAlternative = ($body['action'] ?? '') === 'suggest';
+    if ($hasAlternative && (!valid_date_value($body['suggestedDate'] ?? '') || !valid_time_value($body['suggestedTime'] ?? ''))) {
+        http_response_code(400); echo 'Suggested date and time are required.'; exit;
+    }
     $appointment['customerToken'] = $appointment['customerToken'] ?? bin2hex(random_bytes(24));
     $appointment['status'] = $hasAlternative ? 'alternative_sent' : 'denied';
-    $appointment['suggestedDate'] = $hasAlternative ? (string)($body['suggestedDate'] ?? '') : '';
-    $appointment['suggestedTime'] = $hasAlternative ? (string)($body['suggestedTime'] ?? '') : '';
-    $appointment['ownerMessage'] = (string)($body['ownerMessage'] ?? '');
+    $appointment['suggestedDate'] = $hasAlternative ? clean_text($body['suggestedDate'] ?? '', 10) : '';
+    $appointment['suggestedTime'] = $hasAlternative ? clean_text($body['suggestedTime'] ?? '', 5) : '';
+    $appointment['ownerMessage'] = clean_text($body['ownerMessage'] ?? '', 2000);
     $appointment['updatedAt'] = gmdate('c');
     $appointments[$index] = $appointment;
     write_appointments($appointments);
@@ -649,13 +685,16 @@ if ($method === 'POST' && preg_match('#^/appointments/([^/]+)/reschedule$#', $pa
     if (!required_value($body['preferredDate'] ?? '') || !required_value($body['preferredTime'] ?? '')) {
         http_response_code(400); echo 'Preferred date and time are required.'; exit;
     }
+    if (!valid_date_value($body['preferredDate']) || !valid_time_value($body['preferredTime'])) {
+        http_response_code(400); echo 'Preferred date or time is invalid.'; exit;
+    }
     $appointment = $appointments[$index];
     if (!slot_available($body['preferredDate'], $body['preferredTime'], normalize_duration($appointment['durationMinutes']), $appointment['id'])) {
         http_response_code(409); echo 'That time is already booked. Please go back and choose another time.'; exit;
     }
-    $appointment['preferredDate'] = (string)$body['preferredDate'];
-    $appointment['preferredTime'] = (string)$body['preferredTime'];
-    $appointment['customerMessage'] = (string)($body['customerMessage'] ?? '');
+    $appointment['preferredDate'] = clean_text($body['preferredDate'], 10);
+    $appointment['preferredTime'] = clean_text($body['preferredTime'], 5);
+    $appointment['customerMessage'] = clean_text($body['customerMessage'] ?? '', 2000);
     $appointment['status'] = 'customer_reschedule_requested';
     $appointment['updatedAt'] = gmdate('c');
     $appointments[$index] = $appointment;
