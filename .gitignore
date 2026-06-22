@@ -2,8 +2,10 @@
 node_modules
 dist
 *.log
-server/data
+server
 public/api/data
 google-service-account.json
 *.tsbuildinfo
 deploy
+vite.config.js
+vite.config.d.ts
