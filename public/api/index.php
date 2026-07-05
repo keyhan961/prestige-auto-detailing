@@ -8,6 +8,12 @@ $config = file_exists($configFile)
     : require __DIR__ . '/config.example.php';
 $dataDir = __DIR__ . '/data';
 $appointmentsFile = $dataDir . '/appointments.json';
+$ownerDevicesFile = $dataDir . '/owner-devices.json';
+
+session_name('prestige_owner');
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 
 function required_value($value): bool {
     return is_string($value) && trim($value) !== '';
@@ -52,6 +58,120 @@ function read_body(): array {
         return $json;
     }
     return $_POST;
+}
+
+function owner_dashboard_configured(): bool {
+    global $config;
+    $owner = $config['owner_dashboard'] ?? [];
+    return !empty($owner['enabled']) && (required_value($owner['password_hash'] ?? '') || required_value($owner['password'] ?? ''));
+}
+
+function owner_password_valid(string $password): bool {
+    global $config;
+    $owner = $config['owner_dashboard'] ?? [];
+    if (required_value($owner['password_hash'] ?? '')) {
+        return password_verify($password, (string)$owner['password_hash']);
+    }
+    if (required_value($owner['password'] ?? '')) {
+        return hash_equals((string)$owner['password'], $password);
+    }
+    return false;
+}
+
+function owner_logged_in(): bool {
+    return !empty($_SESSION['owner_authenticated']);
+}
+
+function owner_device_lock_enabled(): bool {
+    global $config;
+    $owner = $config['owner_dashboard'] ?? [];
+    return !empty($owner['device_lock_enabled'])
+        && (required_value($owner['device_code_hash'] ?? '') || required_value($owner['device_code'] ?? ''));
+}
+
+function owner_device_code_valid(string $code): bool {
+    global $config;
+    $owner = $config['owner_dashboard'] ?? [];
+    if (required_value($owner['device_code_hash'] ?? '')) {
+        return password_verify($code, (string)$owner['device_code_hash']);
+    }
+    if (required_value($owner['device_code'] ?? '')) {
+        return hash_equals((string)$owner['device_code'], $code);
+    }
+    return false;
+}
+
+function owner_device_cookie_name(): string {
+    return 'prestige_owner_device';
+}
+
+function read_owner_devices(): array {
+    global $dataDir, $ownerDevicesFile;
+    if (!is_dir($dataDir)) {
+        mkdir($dataDir, 0755, true);
+    }
+    if (!file_exists($ownerDevicesFile)) {
+        return [];
+    }
+    $items = json_decode((string)file_get_contents($ownerDevicesFile), true);
+    return is_array($items) ? $items : [];
+}
+
+function write_owner_devices(array $devices): void {
+    global $dataDir, $ownerDevicesFile;
+    if (!is_dir($dataDir)) {
+        mkdir($dataDir, 0755, true);
+    }
+    file_put_contents($ownerDevicesFile, json_encode(array_values($devices), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function owner_device_trusted(): bool {
+    if (!owner_device_lock_enabled()) {
+        return true;
+    }
+    $token = (string)($_COOKIE[owner_device_cookie_name()] ?? '');
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+        return false;
+    }
+    $hash = hash('sha256', $token);
+    foreach (read_owner_devices() as $device) {
+        if (hash_equals((string)($device['tokenHash'] ?? ''), $hash)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function trust_owner_device(string $label = ''): void {
+    $token = bin2hex(random_bytes(32));
+    $devices = read_owner_devices();
+    $devices[] = [
+        'id' => bin2hex(random_bytes(8)),
+        'label' => clean_text($label, 80),
+        'tokenHash' => hash('sha256', $token),
+        'createdAt' => gmdate('c'),
+        'userAgent' => clean_text($_SERVER['HTTP_USER_AGENT'] ?? '', 300),
+    ];
+    write_owner_devices($devices);
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    setcookie(owner_device_cookie_name(), $token, time() + 31536000, '/', '', $secure, true);
+}
+
+function clear_owner_device_cookie(): void {
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    setcookie(owner_device_cookie_name(), '', time() - 42000, '/', '', $secure, true);
+}
+
+function require_owner_json(): void {
+    if (!owner_dashboard_configured()) {
+        json_response(['message' => 'Owner dashboard is not configured.'], 503);
+    }
+    if (!owner_device_trusted()) {
+        json_response(['message' => 'This device is not trusted for owner access.'], 403);
+    }
+    if (!owner_logged_in()) {
+        json_response(['message' => 'Owner login required.'], 401);
+    }
 }
 
 function db_configured(): bool {
@@ -425,7 +545,7 @@ function normalize_duration($value): int {
 }
 
 function overlaps(string $date, string $time, int $duration, array $appointment): bool {
-    if (($appointment['status'] ?? '') !== 'confirmed') {
+    if (!in_array(($appointment['status'] ?? ''), ['ongoing', 'confirmed'], true)) {
         return false;
     }
     if (($appointment['preferredDate'] ?? '') !== $date || empty($appointment['preferredTime'])) {
@@ -498,10 +618,260 @@ function find_appointment_index(array $appointments, string $id): int {
     return -1;
 }
 
+function admin_appointment(array $appointment): array {
+    return [
+        'id' => $appointment['id'] ?? '',
+        'status' => $appointment['status'] ?? '',
+        'createdAt' => $appointment['createdAt'] ?? '',
+        'updatedAt' => $appointment['updatedAt'] ?? '',
+        'completedAt' => $appointment['completedAt'] ?? '',
+        'name' => $appointment['name'] ?? '',
+        'email' => $appointment['email'] ?? '',
+        'phone' => $appointment['phone'] ?? '',
+        'vehicleMake' => $appointment['vehicleMake'] ?? '',
+        'vehicleModel' => $appointment['vehicleModel'] ?? '',
+        'service' => $appointment['service'] ?? '',
+        'durationMinutes' => normalize_duration($appointment['durationMinutes'] ?? 120),
+        'preferredDate' => $appointment['preferredDate'] ?? '',
+        'preferredTime' => $appointment['preferredTime'] ?? '',
+        'message' => $appointment['message'] ?? '',
+        'suggestedDate' => $appointment['suggestedDate'] ?? '',
+        'suggestedTime' => $appointment['suggestedTime'] ?? '',
+        'ownerMessage' => $appointment['ownerMessage'] ?? '',
+        'source' => $appointment['source'] ?? 'website',
+        'calendarEventId' => $appointment['calendarEventId'] ?? '',
+        'calendarEventLink' => $appointment['calendarEventLink'] ?? '',
+        'calendarError' => $appointment['calendarError'] ?? '',
+    ];
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $path = preg_replace('#^/api#', '', $path);
 $path = $path === '' ? '/' : $path;
+
+if ($method === 'GET' && $path === '/admin/session') {
+    json_response([
+        'configured' => owner_dashboard_configured(),
+        'deviceLockEnabled' => owner_device_lock_enabled(),
+        'deviceTrusted' => owner_device_trusted(),
+        'authenticated' => owner_logged_in(),
+    ]);
+}
+
+if ($method === 'POST' && $path === '/admin/device/trust') {
+    if (!owner_dashboard_configured()) {
+        json_response(['message' => 'Owner dashboard is not configured.'], 503);
+    }
+    if (!owner_device_lock_enabled()) {
+        json_response(['message' => 'Device lock is not enabled.', 'deviceTrusted' => true]);
+    }
+    $body = read_body();
+    $code = (string)($body['code'] ?? '');
+    if (!owner_device_code_valid($code)) {
+        json_response(['message' => 'Invalid device access code.'], 401);
+    }
+    trust_owner_device((string)($body['label'] ?? 'Owner device'));
+    json_response(['message' => 'This device is now trusted.', 'deviceTrusted' => true]);
+}
+
+if ($method === 'POST' && $path === '/admin/login') {
+    if (!owner_dashboard_configured()) {
+        json_response(['message' => 'Owner dashboard is not configured.'], 503);
+    }
+    if (!owner_device_trusted()) {
+        json_response(['message' => 'This device is not trusted for owner access.'], 403);
+    }
+    $body = read_body();
+    $password = (string)($body['password'] ?? '');
+    if (!owner_password_valid($password)) {
+        json_response(['message' => 'Invalid password.'], 401);
+    }
+    session_regenerate_id(true);
+    $_SESSION['owner_authenticated'] = true;
+    json_response(['message' => 'Logged in.']);
+}
+
+if ($method === 'POST' && $path === '/admin/logout') {
+    $_SESSION = [];
+    if (ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000, $params['path'], $params['domain'], (bool)$params['secure'], (bool)$params['httponly']);
+    }
+    session_destroy();
+    json_response(['message' => 'Logged out.']);
+}
+
+if ($method === 'GET' && $path === '/admin/appointments') {
+    require_owner_json();
+    $appointments = array_map('admin_appointment', read_appointments());
+    usort($appointments, static function (array $a, array $b): int {
+        return strcmp(($a['preferredDate'] ?? '') . ' ' . ($a['preferredTime'] ?? ''), ($b['preferredDate'] ?? '') . ' ' . ($b['preferredTime'] ?? ''));
+    });
+    json_response(['appointments' => $appointments]);
+}
+
+if ($method === 'POST' && $path === '/admin/appointments') {
+    require_owner_json();
+    $body = read_body();
+    foreach (['name', 'phone', 'service', 'preferredDate', 'preferredTime'] as $field) {
+        if (!required_value($body[$field] ?? '')) {
+            json_response(['message' => 'Name, phone, service, preferred date, and preferred time are required.'], 400);
+        }
+    }
+    if (required_value($body['email'] ?? '') && !filter_var((string)$body['email'], FILTER_VALIDATE_EMAIL)) {
+        json_response(['message' => 'Email address is invalid.'], 400);
+    }
+    if (!valid_date_value($body['preferredDate']) || !valid_time_value($body['preferredTime'])) {
+        json_response(['message' => 'Preferred date or time is invalid.'], 400);
+    }
+    $duration = normalize_duration($body['durationMinutes'] ?? 120);
+    if (!slot_available($body['preferredDate'], $body['preferredTime'], $duration)) {
+        json_response(['message' => 'That date and time is already booked.'], 409);
+    }
+
+    $appointment = [
+        'id' => bin2hex(random_bytes(16)),
+        'token' => bin2hex(random_bytes(24)),
+        'customerToken' => bin2hex(random_bytes(24)),
+        'status' => 'ongoing',
+        'source' => 'owner_manual',
+        'createdAt' => gmdate('c'),
+        'updatedAt' => gmdate('c'),
+        'language' => 'owner',
+        'name' => clean_text($body['name'], 120),
+        'email' => clean_text($body['email'] ?? '', 190),
+        'phone' => clean_text($body['phone'], 60),
+        'vehicleMake' => clean_text($body['vehicleMake'] ?? '', 80),
+        'vehicleModel' => clean_text($body['vehicleModel'] ?? '', 80),
+        'service' => clean_text($body['service'], 120),
+        'durationMinutes' => $duration,
+        'preferredDate' => clean_text($body['preferredDate'], 10),
+        'preferredTime' => clean_text($body['preferredTime'], 5),
+        'message' => clean_text($body['message'] ?? '', 2000),
+    ];
+    $calendarMessage = confirm_appointment_calendar($appointment);
+    $appointments = read_appointments();
+    $appointments[] = $appointment;
+    write_appointments($appointments);
+    json_response([
+        'message' => 'Manual appointment added.',
+        'calendarMessage' => $calendarMessage,
+        'appointment' => admin_appointment($appointment),
+    ], 201);
+}
+
+if ($method === 'POST' && preg_match('#^/admin/appointments/([a-f0-9]+)/confirm$#', $path, $matches)) {
+    require_owner_json();
+    $appointments = read_appointments();
+    $index = find_appointment_index($appointments, $matches[1]);
+    if ($index < 0) {
+        json_response(['message' => 'Appointment was not found.'], 404);
+    }
+    if (!in_array(($appointments[$index]['status'] ?? ''), ['pending', 'customer_reschedule_requested'], true)) {
+        json_response(['message' => 'Only pending appointments can be confirmed.'], 400);
+    }
+
+    $duration = normalize_duration($appointments[$index]['durationMinutes'] ?? 120);
+    if (!slot_available($appointments[$index]['preferredDate'] ?? '', $appointments[$index]['preferredTime'] ?? '', $duration, $appointments[$index]['id'] ?? '')) {
+        json_response(['message' => 'That date and time is already booked.'], 409);
+    }
+
+    $appointments[$index]['status'] = 'ongoing';
+    $appointments[$index]['updatedAt'] = gmdate('c');
+    $calendarMessage = confirm_appointment_calendar($appointments[$index]);
+    write_appointments($appointments);
+
+    $mailMessage = '';
+    if (required_value($appointments[$index]['email'] ?? '')) {
+        $sent = send_site_mail(
+            $appointments[$index]['email'],
+            'Your Prestige Auto Detailing appointment is confirmed',
+            customer_decision_text('confirmed', $appointments[$index]),
+            $GLOBALS['config']['company_email']
+        );
+        $mailMessage = $sent ? 'Customer confirmation email sent.' : 'Customer email could not be sent.';
+    }
+
+    json_response([
+        'message' => 'Appointment confirmed and moved to ongoing.',
+        'calendarMessage' => $calendarMessage,
+        'mailMessage' => $mailMessage,
+        'appointment' => admin_appointment($appointments[$index]),
+    ]);
+}
+
+if ($method === 'POST' && preg_match('#^/admin/appointments/([a-f0-9]+)/reschedule$#', $path, $matches)) {
+    require_owner_json();
+    $body = read_body();
+    if (!valid_date_value($body['suggestedDate'] ?? '') || !valid_time_value($body['suggestedTime'] ?? '')) {
+        json_response(['message' => 'Suggested date and time are required.'], 400);
+    }
+
+    $appointments = read_appointments();
+    $index = find_appointment_index($appointments, $matches[1]);
+    if ($index < 0) {
+        json_response(['message' => 'Appointment was not found.'], 404);
+    }
+    if (!in_array(($appointments[$index]['status'] ?? ''), ['pending', 'customer_reschedule_requested', 'alternative_sent'], true)) {
+        json_response(['message' => 'Only pending appointments can be rescheduled.'], 400);
+    }
+    $duration = normalize_duration($appointments[$index]['durationMinutes'] ?? 120);
+    if (!slot_available($body['suggestedDate'], $body['suggestedTime'], $duration, $appointments[$index]['id'] ?? '')) {
+        json_response(['message' => 'That suggested date and time is already booked.'], 409);
+    }
+
+    $appointments[$index]['customerToken'] = $appointments[$index]['customerToken'] ?? bin2hex(random_bytes(24));
+    $appointments[$index]['status'] = 'alternative_sent';
+    $appointments[$index]['suggestedDate'] = clean_text($body['suggestedDate'], 10);
+    $appointments[$index]['suggestedTime'] = clean_text($body['suggestedTime'], 5);
+    $appointments[$index]['ownerMessage'] = clean_text($body['ownerMessage'] ?? 'The requested time is not available. We can offer this alternative appointment time.', 2000);
+    $appointments[$index]['updatedAt'] = gmdate('c');
+    write_appointments($appointments);
+
+    $acceptUrl = base_url() . '/api/appointments/' . $appointments[$index]['id'] . '/alternative/accept?token=' . $appointments[$index]['customerToken'];
+    $rescheduleUrl = base_url() . '/api/appointments/' . $appointments[$index]['id'] . '/reschedule?token=' . $appointments[$index]['customerToken'];
+    $html = mail_shell(
+        'Alternative Appointment Time',
+        "Hello {$appointments[$index]['name']},\n\nYour requested appointment time for {$appointments[$index]['service']} could not be confirmed. We can offer this alternative time instead.",
+        '<strong>Suggested date:</strong> ' . h($appointments[$index]['suggestedDate']) . '<br>'
+            . '<strong>Suggested time:</strong> ' . h($appointments[$index]['suggestedTime']) . '<br>'
+            . '<strong>Message:</strong><br>' . nl2br(h($appointments[$index]['ownerMessage'])),
+        [
+            ['label' => 'Accept suggested time', 'url' => $acceptUrl, 'color' => '#16a34a'],
+            ['label' => 'Request another time', 'url' => $rescheduleUrl, 'color' => '#e21b23'],
+        ]
+    );
+    $sent = send_site_mail($appointments[$index]['email'], 'Prestige Auto Detailing - alternative appointment time', $html, $GLOBALS['config']['company_email'], true);
+
+    json_response([
+        'message' => 'Alternative time saved and sent to customer.',
+        'mailMessage' => $sent ? 'Customer email sent.' : 'Customer email could not be sent.',
+        'appointment' => admin_appointment($appointments[$index]),
+    ]);
+}
+
+if ($method === 'POST' && preg_match('#^/admin/appointments/([a-f0-9]+)/complete$#', $path, $matches)) {
+    require_owner_json();
+    $appointments = read_appointments();
+    $index = find_appointment_index($appointments, $matches[1]);
+    if ($index < 0) {
+        json_response(['message' => 'Appointment was not found.'], 404);
+    }
+    if (!in_array(($appointments[$index]['status'] ?? ''), ['ongoing', 'confirmed'], true)) {
+        json_response(['message' => 'Only ongoing appointments can be marked done.'], 400);
+    }
+
+    $appointments[$index]['status'] = 'completed';
+    $appointments[$index]['completedAt'] = gmdate('c');
+    $appointments[$index]['updatedAt'] = gmdate('c');
+    write_appointments($appointments);
+
+    json_response([
+        'message' => 'Appointment marked done.',
+        'appointment' => admin_appointment($appointments[$index]),
+    ]);
+}
 
 if ($method === 'POST' && $path === '/availability') {
     $body = read_body();
@@ -595,7 +965,7 @@ if ($method === 'GET' && preg_match('#^/appointments/([^/]+)/(confirm|deny|resch
     if (!in_array($appointment['status'], ['pending', 'customer_reschedule_requested'], true)) {
         echo '<html><body style="font-family:Arial;padding:40px;"><h1>Already handled</h1><p>This appointment is already marked as <strong>' . h($appointment['status']) . '</strong>.</p></body></html>'; exit;
     }
-    $appointment['status'] = 'confirmed';
+    $appointment['status'] = 'ongoing';
     $appointment['updatedAt'] = gmdate('c');
     $calendarMessage = confirm_appointment_calendar($appointment);
     $appointments[$index] = $appointment;
@@ -664,7 +1034,7 @@ if ($method === 'GET' && preg_match('#^/appointments/([^/]+)/alternative/accept$
     }
     $appointment['preferredDate'] = $appointment['suggestedDate'];
     $appointment['preferredTime'] = $appointment['suggestedTime'];
-    $appointment['status'] = 'confirmed';
+    $appointment['status'] = 'ongoing';
     $appointment['updatedAt'] = gmdate('c');
     $calendarMessage = confirm_appointment_calendar($appointment);
     $appointments[$index] = $appointment;

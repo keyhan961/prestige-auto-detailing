@@ -4,6 +4,7 @@ dist
 *.log
 server
 public/api/data
+public/api/config.php
 google-service-account.json
 *.tsbuildinfo
 deploy
