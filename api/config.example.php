@@ -19,4 +19,10 @@ return [
         'service_account_file' => __DIR__ . '/private/google-service-account.json',
         'timezone' => 'Europe/Helsinki',
     ],
+    'owner_dashboard' => [
+        'enabled' => false,
+        'password_hash' => '',
+        'device_lock_enabled' => false,
+        'device_code_hash' => '',
+    ],
 ];

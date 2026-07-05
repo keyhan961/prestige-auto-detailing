@@ -1,5 +1,7 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteRule ^data(/.*)?$ - [F,L]
+  RewriteRule ^private(/.*)?$ - [F,L]
+  RewriteRule ^config\.php$ - [F,L]
   RewriteRule . index.php [L,QSA]
 </IfModule>
