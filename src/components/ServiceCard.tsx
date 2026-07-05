@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { Button } from './Button';
 
 type ServiceCardProps = {
   service: {
@@ -9,9 +10,11 @@ type ServiceCardProps = {
     description: string;
     benefits: string[];
   };
+  actionLabel?: string;
+  actionTo?: string;
 };
 
-export function ServiceCard({ service }: ServiceCardProps) {
+export function ServiceCard({ service, actionLabel, actionTo }: ServiceCardProps) {
   const Icon = service.icon;
 
   return (
@@ -34,6 +37,13 @@ export function ServiceCard({ service }: ServiceCardProps) {
           </span>
         ))}
       </div>
+      {actionTo && actionLabel && (
+        <div className="mt-6">
+          <Button to={actionTo} className="w-full sm:w-auto">
+            {actionLabel}
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

@@ -5,13 +5,21 @@ import { Button } from './Button';
 const fieldNames = ['name', 'email', 'phone', 'vehicleMake', 'vehicleModel'] as const;
 const fieldTypes = ['text', 'email', 'tel', 'text', 'text'];
 
-export function BookingForm() {
+type BookingFormProps = {
+  preselectedServiceTitle?: string;
+};
+
+export function BookingForm({ preselectedServiceTitle }: BookingFormProps) {
   const { content, language } = useLanguage();
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [availability, setAvailability] = useState<'idle' | 'checking' | 'available' | 'booked' | 'error'>('idle');
+  const selectedServiceTitle = preselectedServiceTitle && content.services.some((service) => service.title === preselectedServiceTitle) ? preselectedServiceTitle : undefined;
 
   const getSelectedService = (form: HTMLFormElement) => {
+    if (selectedServiceTitle) {
+      return content.services.find((service) => service.title === selectedServiceTitle) || content.services[0];
+    }
     const data = new FormData(form);
     return content.services.find((service) => service.title === data.get('service')) || content.services[0];
   };
@@ -133,13 +141,22 @@ export function BookingForm() {
       ))}
       <label className="grid gap-2 text-sm font-semibold text-white">
         {content.form.service}
-        <select name="service" required className="rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-platinum outline-none transition focus:border-gold">
-          {content.services.map((service) => (
-            <option key={service.title} value={service.title}>
-              {service.title}
-            </option>
-          ))}
-        </select>
+        {selectedServiceTitle ? (
+          <>
+            <input type="hidden" name="service" value={selectedServiceTitle} />
+            <select disabled value={selectedServiceTitle} className="rounded-lg border border-gold/30 bg-black/40 px-4 py-3 text-platinum outline-none">
+              <option value={selectedServiceTitle}>{selectedServiceTitle}</option>
+            </select>
+          </>
+        ) : (
+          <select name="service" required className="rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-platinum outline-none transition focus:border-gold">
+            {content.services.map((service) => (
+              <option key={service.title} value={service.title}>
+                {service.title}
+              </option>
+            ))}
+          </select>
+        )}
       </label>
       <label className="grid gap-2 text-sm font-semibold text-white">
         {content.form.date}
