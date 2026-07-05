@@ -1,6 +1,7 @@
 import { Award, Clock, ShieldCheck, Sparkles } from 'lucide-react';
 import { SEO } from '../components/SEO';
 import { SectionHeading } from '../components/SectionHeading';
+import { localBusinessStructuredData } from '../data/seo';
 import { useLanguage } from '../i18n';
 
 export function About() {
@@ -9,7 +10,7 @@ export function About() {
 
   return (
     <>
-      <SEO title={page.seoTitle} description={page.seoDescription} />
+      <SEO title={page.seoTitle} description={page.seoDescription} structuredData={localBusinessStructuredData} />
       <section className="section-pad bg-obsidian pt-32">
         <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1fr_0.9fr] lg:items-center">
           <div>

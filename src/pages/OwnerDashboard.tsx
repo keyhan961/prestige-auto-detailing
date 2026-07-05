@@ -377,7 +377,7 @@ export function OwnerDashboard() {
 
   return (
     <>
-      <SEO title="Owner Dashboard | Prestige Auto Detailing" description="Private owner booking dashboard." />
+      <SEO title="Owner Dashboard | Prestige Auto Detailing" description="Private owner booking dashboard." noIndex />
       <section className="section-pad bg-obsidian pt-32">
         <SectionHeading eyebrow="Owner" title="Booking Dashboard" copy="Manage website bookings, review previous appointments, and add manual appointments for customers who book outside the website." />
 

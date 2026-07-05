@@ -3,6 +3,7 @@ import { BookingForm } from '../components/BookingForm';
 import { Button } from '../components/Button';
 import { SEO } from '../components/SEO';
 import { SectionHeading } from '../components/SectionHeading';
+import { serviceStructuredData } from '../data/seo';
 import { useLanguage } from '../i18n';
 import { serviceIndexFromSlug } from '../utils/serviceRoutes';
 
@@ -21,7 +22,7 @@ export function ServiceBooking() {
 
   return (
     <>
-      <SEO title={`${service.title} | Prestige Auto Detailing`} description={service.description} />
+      <SEO title={`${service.title} in Espoo | Prestige Auto Detailing`} description={service.description} structuredData={serviceStructuredData(service)} />
       <section className="section-pad bg-[radial-gradient(circle_at_top,rgba(226,27,35,.16),transparent_36%)] pt-32">
         <SectionHeading eyebrow={page.bookingEyebrow} title={service.title} copy={service.description} />
         <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[0.85fr_1.15fr]">

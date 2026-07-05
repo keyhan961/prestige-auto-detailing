@@ -2,6 +2,7 @@ import { X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { SEO } from '../components/SEO';
 import { SectionHeading } from '../components/SectionHeading';
+import { localBusinessStructuredData } from '../data/seo';
 import { useLanguage } from '../i18n';
 
 export function Gallery() {
@@ -22,7 +23,7 @@ export function Gallery() {
 
   return (
     <>
-      <SEO title={page.seoTitle} description={page.seoDescription} />
+      <SEO title={page.seoTitle} description={page.seoDescription} structuredData={localBusinessStructuredData} />
       <section className="section-pad bg-obsidian pt-32">
         <SectionHeading eyebrow={page.eyebrow} title={page.title} copy={page.copy} />
         <div className="mx-auto mb-10 flex max-w-5xl flex-wrap justify-center gap-3">

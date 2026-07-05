@@ -5,6 +5,7 @@ import { SEO } from '../components/SEO';
 import { SectionHeading } from '../components/SectionHeading';
 import { ServiceCard } from '../components/ServiceCard';
 import { Stats } from '../components/Stats';
+import { faqStructuredData, localBusinessStructuredData, websiteStructuredData } from '../data/seo';
 import { useLanguage } from '../i18n';
 
 export function Home() {
@@ -13,7 +14,7 @@ export function Home() {
 
   return (
     <>
-      <SEO title={home.seoTitle} description={home.seoDescription} />
+      <SEO title={home.seoTitle} description={home.seoDescription} structuredData={[localBusinessStructuredData, websiteStructuredData, faqStructuredData(content.faqs)]} />
       <section className="relative min-h-[100svh] overflow-hidden">
         <div className="absolute right-[-18%] top-1/2 w-[92vw] max-w-[760px] -translate-y-1/2 sm:right-[-8%] sm:w-[74vw] md:right-[3%] md:w-[48vw]">
           <div className="absolute -inset-10 rounded-[3rem] bg-black/60 blur-3xl" />

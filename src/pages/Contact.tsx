@@ -3,6 +3,7 @@ import { BookingForm } from '../components/BookingForm';
 import { SEO } from '../components/SEO';
 import { SectionHeading } from '../components/SectionHeading';
 import { TikTokIcon } from '../components/TikTokIcon';
+import { localBusinessStructuredData } from '../data/seo';
 import { contactDetails, socialLinks } from '../data/site';
 import { useLanguage } from '../i18n';
 
@@ -23,7 +24,7 @@ export function Contact() {
 
   return (
     <>
-      <SEO title={page.seoTitle} description={page.seoDescription} />
+      <SEO title={page.seoTitle} description={page.seoDescription} structuredData={localBusinessStructuredData} />
       <section className="section-pad bg-obsidian pt-32">
         <SectionHeading eyebrow={page.eyebrow} title={page.title} copy={page.copy} />
         <div className="mx-auto grid min-w-0 max-w-7xl gap-8 lg:grid-cols-[0.9fr_1.1fr]">
