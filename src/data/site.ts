@@ -47,6 +47,10 @@ const makeServices = (items: [string, string, string, number, string, string[]][
     icon: serviceIcons[index],
   }));
 
+type GalleryMediaType = 'image' | 'video';
+const makeGalleryItems = (items: [string, string, string, GalleryMediaType?, string?][]) =>
+  items.map(([title, category, image, mediaType = 'image', poster]) => ({ title, category, image, mediaType, poster }));
+
 export const localizedSite = {
   en: {
     nav: ['Home', 'Services', 'Gallery', 'About', 'Contact'],
@@ -170,17 +174,21 @@ export const localizedSite = {
       ['Engine Bay Cleaning', 'From 99 €', '1-2 hours', 120, 'Controlled degreasing and dressing for a clean, presentable engine compartment.', ['Safer cleaning methods', 'Dressed plastics', 'Show-ready finish']],
       ['Full Detail Package', 'From 399 €', 'Full day', 480, 'Complete interior and exterior detail with premium finishing touches for a total vehicle reset.', ['Best overall value', 'Inside-out refresh', 'Premium finish']],
     ]),
-    galleryItems: [
+    galleryItems: makeGalleryItems([
       ['Mirror Finish Correction', 'Paint Correction', '/assets/gallery/exterior-wheel-well.jpeg'],
       ['Executive Interior Reset', 'Interior', '/assets/gallery/interior-cargo.jpeg'],
       ['Luxury Exterior Detail', 'Exterior', '/assets/gallery/exterior-studio.jpeg'],
       ['Gloss Enhancement', 'Exterior', '/assets/gallery/exterior-gloss.jpeg'],
+      ['Audi Ceramic Coating Finish', 'Ceramic Coating', '/assets/gallery/ceramic-coating-audi-front.jpeg'],
+      ['Ceramic Coating Gloss Detail', 'Ceramic Coating', '/assets/gallery/ceramic-coating-audi-side.jpeg'],
+      ['Protected Cabriolet Finish', 'Ceramic Coating', '/assets/gallery/ceramic-coating-audi-rear-sanitized.jpeg'],
+      ['Ceramic Coating Walkaround', 'Ceramic Coating', '/assets/gallery/ceramic-coating-audi-video-sanitized.mp4', 'video', '/assets/gallery/ceramic-coating-audi-video-poster.jpeg'],
       ['Studio Exterior Prep', 'Exterior', '/assets/gallery/exterior-audi-sanitized.jpeg'],
       ['Foam Wash Detail', 'Exterior', '/assets/gallery/exterior-foam-sanitized.jpeg'],
       ['Red Volkswagen Detail', 'Exterior', '/assets/gallery/exterior-red-vw-sanitized.jpeg'],
       ['Mercedes Interior Detail', 'Interior', '/assets/gallery/interior-mercedes.jpeg'],
       ['Detailed Engine Bay', 'Engine Bay Cleaning', '/assets/gallery/engine-bay-cleaning.jpeg'],
-    ].map(([title, category, image]) => ({ title, category, image })),
+    ]),
     testimonials: [
       { name: 'Fresh, Focused Service', vehicle: 'New Studio Mindset', quote: 'As a growing detailing company, every booking gets direct attention, careful preparation, and honest recommendations.' },
       { name: 'Measured Results', vehicle: 'Paint-Safe Process', quote: 'We inspect the vehicle first, choose the right products, and work step by step instead of rushing the finish.' },
@@ -321,17 +329,21 @@ export const localizedSite = {
       ['Moottoritilan puhdistus', 'Alkaen 99 €', '1-2 tuntia', 120, 'Hallittu rasvanpoisto ja viimeistely siistiä ja esittelykelpoista moottoritilaa varten.', ['Turvalliset menetelmät', 'Muovien viimeistely', 'Näyttävä lopputulos']],
       ['Täysi detail-paketti', 'Alkaen 399 €', 'Koko päivä', 480, 'Täydellinen sisä- ja ulkopuolen käsittely premium-viimeistelyllä.', ['Paras kokonaisarvo', 'Sisältä ja ulkoa', 'Premium-lopputulos']],
     ]),
-    galleryItems: [
+    galleryItems: makeGalleryItems([
       ['Peilikiiltävä korjaus', 'Maalipinnan korjaus', '/assets/gallery/exterior-wheel-well.jpeg'],
       ['Premium-sisätilojen puhdistus', 'Sisätilat', '/assets/gallery/interior-cargo.jpeg'],
       ['Ulkopintojen viimeistely', 'Ulkopinta', '/assets/gallery/exterior-studio.jpeg'],
       ['Kiillon parannus', 'Ulkopinta', '/assets/gallery/exterior-gloss.jpeg'],
+      ['Audi keraaminen pinnoitus', 'Keraaminen pinnoitus', '/assets/gallery/ceramic-coating-audi-front.jpeg'],
+      ['Keraamisen pinnoituksen kiilto', 'Keraaminen pinnoitus', '/assets/gallery/ceramic-coating-audi-side.jpeg'],
+      ['Suojattu cabriolet-viimeistely', 'Keraaminen pinnoitus', '/assets/gallery/ceramic-coating-audi-rear-sanitized.jpeg'],
+      ['Keraamisen pinnoituksen video', 'Keraaminen pinnoitus', '/assets/gallery/ceramic-coating-audi-video-sanitized.mp4', 'video', '/assets/gallery/ceramic-coating-audi-video-poster.jpeg'],
       ['Studion ulkopintojen valmistelu', 'Ulkopinta', '/assets/gallery/exterior-audi-sanitized.jpeg'],
       ['Vaahtopesu', 'Ulkopinta', '/assets/gallery/exterior-foam-sanitized.jpeg'],
       ['Punainen Volkswagen detail', 'Ulkopinta', '/assets/gallery/exterior-red-vw-sanitized.jpeg'],
       ['Mercedes-sisätilojen detail', 'Sisätilat', '/assets/gallery/interior-mercedes.jpeg'],
       ['Siisti moottoritila', 'Moottoritilan puhdistus', '/assets/gallery/engine-bay-cleaning.jpeg'],
-    ].map(([title, category, image]) => ({ title, category, image })),
+    ]),
     testimonials: [
       { name: 'Tuore ja keskittynyt palvelu', vehicle: 'Uuden studion ote', quote: 'Kasvavana detailing-yrityksenä annamme jokaiselle varaukselle suoran huomion, huolellisen valmistelun ja rehelliset suositukset.' },
       { name: 'Hallittu lopputulos', vehicle: 'Maalipinnalle turvallinen prosessi', quote: 'Tarkastamme auton ensin, valitsemme oikeat tuotteet ja etenemme vaiheittain ilman kiirettä.' },
@@ -472,17 +484,21 @@ export const localizedSite = {
       ['Мойка моторного отсека', 'От 99 €', '1-2 часа', 120, 'Контролируемое обезжиривание и финиш для чистого и презентабельного моторного отсека.', ['Безопасные методы', 'Уход за пластиком', 'Готово к показу']],
       ['Полный детейлинг-пакет', 'От 399 €', 'Полный день', 480, 'Полная обработка салона и кузова с премиальными финишными деталями.', ['Лучшее соотношение', 'Салон и кузов', 'Премиальный результат']],
     ]),
-    galleryItems: [
+    galleryItems: makeGalleryItems([
       ['Зеркальная коррекция', 'Коррекция ЛКП', '/assets/gallery/exterior-wheel-well.jpeg'],
       ['Премиальная чистка салона', 'Интерьер', '/assets/gallery/interior-cargo.jpeg'],
       ['Внешний детейлинг', 'Экстерьер', '/assets/gallery/exterior-studio.jpeg'],
       ['Усиление блеска', 'Экстерьер', '/assets/gallery/exterior-gloss.jpeg'],
+      ['Audi ceramic coating', 'Керамика', '/assets/gallery/ceramic-coating-audi-front.jpeg'],
+      ['Ceramic coating gloss', 'Керамика', '/assets/gallery/ceramic-coating-audi-side.jpeg'],
+      ['Protected cabriolet finish', 'Керамика', '/assets/gallery/ceramic-coating-audi-rear-sanitized.jpeg'],
+      ['Ceramic coating video', 'Керамика', '/assets/gallery/ceramic-coating-audi-video-sanitized.mp4', 'video', '/assets/gallery/ceramic-coating-audi-video-poster.jpeg'],
       ['Подготовка экстерьера в студии', 'Экстерьер', '/assets/gallery/exterior-audi-sanitized.jpeg'],
       ['Пенная мойка', 'Экстерьер', '/assets/gallery/exterior-foam-sanitized.jpeg'],
       ['Детейлинг красного Volkswagen', 'Экстерьер', '/assets/gallery/exterior-red-vw-sanitized.jpeg'],
       ['Детейлинг салона Mercedes', 'Интерьер', '/assets/gallery/interior-mercedes.jpeg'],
       ['Чистый моторный отсек', 'Моторный отсек', '/assets/gallery/engine-bay-cleaning.jpeg'],
-    ].map(([title, category, image]) => ({ title, category, image })),
+    ]),
     testimonials: [
       { name: 'Свежий и внимательный сервис', vehicle: 'Подход новой студии', quote: 'Как растущая detailing-компания, мы уделяем каждой записи прямое внимание, аккуратную подготовку и честные рекомендации.' },
       { name: 'Контролируемый результат', vehicle: 'Безопасный процесс для ЛКП', quote: 'Мы сначала осматриваем автомобиль, подбираем подходящие средства и работаем по шагам без спешки.' },
