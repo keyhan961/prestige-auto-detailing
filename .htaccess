@@ -1,4 +1,6 @@
 <IfModule mod_rewrite.c>
+  DirectoryIndex index.html index.php
+
   RewriteEngine On
 
   RewriteRule ^api(/.*)?$ api/index.php [L,QSA]
