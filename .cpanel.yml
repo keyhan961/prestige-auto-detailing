@@ -3,5 +3,7 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/prestige/public_html/
     - /bin/rm -f $DEPLOYPATH/index.php
+    - /bin/rm -f $DEPLOYPATH/.litespeed_flag
+    - /bin/rm -rf $DEPLOYPATH/lscache
     - /bin/cp -R * $DEPLOYPATH
     - /bin/cp -R .htaccess $DEPLOYPATH
